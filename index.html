@@ -313,7 +313,7 @@ nav.bnav{
     <button class="hbtn" data-open-profile="1" aria-label="Perfil y ajustes">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.36.44.63.8.78H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
-    <button class="hbtn" data-open-update="1" aria-label="Actualizar la app">
+    <button class="hbtn" data-open-update="1" aria-label="Sincronizar y actualizar">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
     </button>
   </header>
@@ -564,7 +564,11 @@ function showToast(msg){
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { root.innerHTML = ''; }, 2600);
 }
-function closeModal(){ document.getElementById('modalRoot').innerHTML = ''; }
+function closeModal(){ document.getElementById('modalRoot').innerHTML = ''; activeSheet = null; }
+/* Qué hoja está abierta ahora mismo (o null). Permite que una sincronización
+   o un respaldo en curso refresque su propia hoja sin tocar el resto de la app. */
+let activeSheet = null;
+function refreshSheetIfOpen(name, openFn){ if (activeSheet === name) openFn(); }
 
 /* ============================================================
    STRAVA
@@ -647,6 +651,7 @@ function disconnectStrava(){
   S.strava = { accessToken:null, refreshToken:null, expiresAt:0, athleteId:null, athleteName:null,
     lastSyncEpoch:0, syncing:false, lastSyncAt:null, error:null, analyzing:0 };
   persist(); showToast('Strava desconectado'); render();
+  refreshSheetIfOpen('update', openUpdateSheet);
 }
 
 function mapActivity(act){
@@ -684,10 +689,11 @@ async function syncStrava(silent){
   if (!stravaConnected()) return;
   if (S.strava.syncing) return;
   const ok = await refreshStravaTokenIfNeeded();
-  if (!ok){ render(); return; }
+  if (!ok){ render(); refreshSheetIfOpen('update', openUpdateSheet); return; }
 
   S.strava.syncing = true;
   if (!silent) render();
+  refreshSheetIfOpen('update', openUpdateSheet);
 
   try{
     const after = S.strava.lastSyncEpoch
@@ -732,6 +738,7 @@ async function syncStrava(silent){
   }finally{
     S.strava.syncing = false;
     render();
+    refreshSheetIfOpen('update', openUpdateSheet);
   }
 }
 
@@ -1625,6 +1632,8 @@ function renderHome(){
         </div>
       </button>` : ''}
 
+      ${renderRecentRides()}
+
       ${insights.length ? `
       <div class="sec">
         <div class="eyebrow">Lo que dicen tus datos</div>
@@ -1632,10 +1641,7 @@ function renderHome(){
         <button class="link" style="display:block;margin:10px auto 0" data-goto="form">Ver todo el análisis →</button>
       </div>` : ''}
 
-      ${renderStravaCard()}
       ${renderMaintenanceCard()}
-      ${renderRecentRides()}
-      ${renderBackupCard()}
     </div>`;
 }
 
@@ -2363,6 +2369,7 @@ function openSheet(title, inner){
 }
 
 function openProfileSheet(){
+  activeSheet = 'profile';
   const p = S.profile, o = S.objective, c = S.planCfg;
   openSheet('Ajustes', `
     <div class="eyebrow b">Tú</div>
@@ -2457,6 +2464,7 @@ function saveStravaCfg(){
 }
 
 function openMaintenanceSheet(){
+  activeSheet = 'maintenance';
   const rows = S.components.map((c,i) => `
     <div class="card" style="margin-top:10px">
       <div style="display:flex;justify-content:space-between;align-items:center">
@@ -2494,6 +2502,7 @@ function saveComponents(){
 }
 
 function openRideSheet(id){
+  activeSheet = 'ride';
   const a = S.activities[id];
   if (!a) return;
   const an = S.analysis[id] || {};
@@ -2584,6 +2593,7 @@ function applyRestored(p){
   rebuildPlan();
 }
 function openBackupSheet(mode){
+  activeSheet = 'backup';
   const data = JSON.stringify(backupPayload());
   openSheet(mode === 'copy' ? 'Exportar tus datos' : 'Importar tus datos', `
     <div class="hint" style="margin-top:0">${mode==='copy'
@@ -2647,6 +2657,7 @@ async function findDriveFile(token){
 async function backupToGoogleDrive(){
   if (!gdriveConfigured()){ showToast('Falta configurar el Client ID de Google'); return; }
   S.googleDrive.syncing = true; S.googleDrive.error = null; render();
+  refreshSheetIfOpen('update', openUpdateSheet);
   try{
     const token = await gdriveGetToken();
     const payload = JSON.stringify(backupPayload(), null, 2);
@@ -2674,6 +2685,7 @@ async function backupToGoogleDrive(){
     showToast(S.googleDrive.error);
   }finally{
     S.googleDrive.syncing = false; await persist(); render();
+    refreshSheetIfOpen('update', openUpdateSheet);
   }
 }
 
@@ -2681,6 +2693,7 @@ async function restoreFromGoogleDrive(){
   if (!gdriveConfigured()){ showToast('Falta configurar el Client ID de Google'); return; }
   if (!window.confirm('Esto reemplaza los datos de este dispositivo con el último respaldo de Drive. ¿Seguir?')) return;
   S.googleDrive.syncing = true; S.googleDrive.error = null; render();
+  refreshSheetIfOpen('update', openUpdateSheet);
   try{
     const token = await gdriveGetToken();
     const fileId = S.googleDrive.fileId || await findDriveFile(token);
@@ -2696,6 +2709,7 @@ async function restoreFromGoogleDrive(){
     showToast(S.googleDrive.error);
   }finally{
     S.googleDrive.syncing = false; await persist(); render();
+    refreshSheetIfOpen('update', openUpdateSheet);
   }
 }
 
@@ -2711,13 +2725,25 @@ let ghFileContent = null;
 function utf8ToBase64(str){ return btoa(unescape(encodeURIComponent(str))); }
 
 function openUpdateSheet(){
+  activeSheet = 'update';
   let saved = '';
   try{ saved = localStorage.getItem(GH_TOKEN_KEY) || ''; }catch(e){ saved = ''; }
   const last = S.github.lastUpdatedAt
     ? new Date(S.github.lastUpdatedAt).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})
     : 'Todavía no se ha actualizado desde aquí.';
-  openSheet('Actualizar CYCLIST', `
-    <div class="hint" style="margin-top:0">Descarga el <b>index.html</b> nuevo, escógelo aquí y súbelo. La app hace el commit sola.</div>
+  openSheet('Sincronizar y actualizar', `
+    <div class="eyebrow b">Strava</div>
+    <div style="margin-top:10px">${renderStravaCard()}</div>
+
+    <div class="zrule">${ZONES.map(z=>`<i style="background:${z.hex}"></i>`).join('')}</div>
+
+    <div class="eyebrow b">Respaldo</div>
+    <div style="margin-top:10px">${renderBackupCard()}</div>
+
+    <div class="zrule">${ZONES.map(z=>`<i style="background:${z.hex}"></i>`).join('')}</div>
+
+    <div class="eyebrow b">Actualizar la app (GitHub)</div>
+    <div class="hint" style="margin-top:8px">Descarga el <b>index.html</b> nuevo, escógelo aquí y súbelo. La app hace el commit sola.</div>
     <div class="drop" id="ghDrop" data-gh-pick="1">${icon('upload',18)} <span id="ghLabel">Escoger el archivo descargado</span></div>
     <input type="file" id="ghFile" accept=".html,text/html" style="display:none">
     <div class="lbl">Token de GitHub</div>

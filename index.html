@@ -421,11 +421,15 @@ const ZONES = [
   { key:'z6', n:6, name:'Anaeróbico',   lo:1.21, hi:1.50, color:'var(--z6)', hex:'#A855F7', why:'Capacidad anaeróbica: ataques y repechos cortos.' },
   { key:'z7', n:7, name:'Neuromuscular',lo:1.51, hi:99,   color:'var(--z7)', hex:'#E6EDF3', why:'Sprint puro, potencia máxima de pocos segundos.' },
 ];
+/* La clasificación busca la primera zona cuyo tope (hi) alcanza o supera al
+   valor: como ZONES está ordenado de forma ascendente y cada hi es el techo
+   de esa zona, cualquier valor real (no solo los redondeados de la tabla)
+   cae siempre en una zona, sin huecos entre los límites publicados. */
 function zoneOf(watts, ftp){
   if (!ftp) return null;
   const r = watts / ftp;
-  for (const z of ZONES) if (r >= z.lo && r <= z.hi) return z;
-  return r < 0.56 ? ZONES[0] : ZONES[6];
+  for (const z of ZONES) if (r <= z.hi) return z;
+  return ZONES[ZONES.length - 1];
 }
 function zoneWatts(z, ftp){
   if (!ftp) return '';
@@ -987,8 +991,9 @@ function tssFor(a){
   const maxHr = S.profile.maxHr;
   const restHr = S.profile.restHr || 55;
   const thrHr = S.profile.thresholdHr || (maxHr ? Math.round(maxHr * 0.90) : null);
-  if (a.avgHr && thrHr && thrHr > restHr){
-    const inten = clamp((a.avgHr - restHr) / (thrHr - restHr), 0, 1.3);
+  const avgHr = (an && an.avgHrCalc) || a.avgHr;   // el del stream ya excluye pausas; más preciso que el resumen de Strava
+  if (avgHr && thrHr && thrHr > restHr){
+    const inten = clamp((avgHr - restHr) / (thrHr - restHr), 0, 1.3);
     return { tss:(t/3600) * inten * inten * 100, if:+inten.toFixed(3), source:'frecuencia cardiaca' };
   }
 
@@ -1975,6 +1980,7 @@ function renderForm(){
           ${cp ? metricBox('Potencia crítica', cp.cp, 'W', `W′ ${(cp.wPrime/1000).toFixed(1)} kJ`, '') : ''}
           ${vo2 ? metricBox('VO₂ máx estimado', vo2, 'ml/kg/min', 'De tus mejores 5 min', '') : ''}
         </div>
+        ${vo2 ? `<div class="tiny" style="margin-top:8px">Es el número menos confiable de esta pantalla: la fórmula (ACSM) suele quedarse corta con ciclistas ya entrenados, y aquí además sustituye la prueba de laboratorio en la que se validó por tu mejor esfuerzo de 5 min en ruta. Tómalo como referencia de tendencia, no como valor exacto.</div>` : ''}
 
         ${est ? `
         <div class="rule"></div>
@@ -2067,9 +2073,14 @@ function renderForm(){
       </div>` : ''}
 
       <div class="tiny" style="margin:20px 0 24px;line-height:1.7">
-        Los modelos usados son los estándar del ciclismo por potencia: TSS, CTL, ATL y TSB de Coggan y Allen; zonas de potencia de 7 niveles;
-        potencia crítica de Monod y Scherrer; consumo de oxígeno estimado con la ecuación de la ACSM. Son estimaciones sobre datos de campo,
-        no mediciones de laboratorio, y ninguna sustituye la valoración de un entrenador o un médico.
+        Los modelos usados son los estándar del ciclismo por potencia: TSS, CTL, ATL y TSB de Coggan y Allen (constantes de 42 y 7 días);
+        siete zonas de potencia de Coggan; potencia crítica de Monod y Scherrer (regresión sobre esfuerzos de 3 a 20 min);
+        consumo de oxígeno estimado con la ecuación de ejercicio en cicloergómetro de la ACSM.
+        Son las más confiables cuando hay potenciómetro: TSS, CTL/ATL/TSB, zonas y potencia crítica calculan directamente sobre tus datos.
+        La estimación de FTP por umbrales de esfuerzo y la relación W/kg contra tablas de referencia son aproximaciones razonables pero con
+        más margen de error. El VO₂ máx es el menos confiable de todos: la fórmula ACSM está pensada para población general de laboratorio,
+        no para ciclistas entrenados, y aquí se aplica sobre un esfuerzo de ruta en vez de una prueba controlada. Ninguna sustituye la
+        valoración de un entrenador o un médico.
       </div>
     </div>`;
 }
